@@ -2,38 +2,75 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>Lector PDF con copia de página</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Lector PDF</title>
+
   <style>
     body {
-      font-family: Arial, sans-serif;
+      margin: 0;
       padding: 20px;
-      background: #f4f4f4;
+      font-family: Arial, sans-serif;
+      background: #f0f0f0;
+    }
+
+    h2 {
+      margin-top: 0;
+    }
+
+    #status {
+      margin: 15px 0;
+      font-weight: bold;
     }
 
     #pdfContainer {
-      margin-top: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 30px;
+    }
+
+    .pageWrapper {
+      position: relative;
+      width: fit-content;
+      margin: auto;
     }
 
     canvas {
       display: block;
-      margin: 20px auto;
+      max-width: 100%;
+      height: auto;
       background: white;
       box-shadow: 0 2px 8px rgba(0,0,0,.25);
-      cursor: copy;
+      border-radius: 8px;
     }
 
-    #status {
-      margin-top: 10px;
-      font-weight: bold;
+    .copyBtn {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      border: none;
+      background: #1976d2;
+      color: white;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 14px;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,.3);
+    }
+
+    .copyBtn:hover {
+      background: #125ca1;
     }
   </style>
 </head>
 <body>
 
-  <h2>Subir y leer PDF</h2>
+  <h2>Subir PDF</h2>
 
-  <input type="file" id="pdfInput" accept="application/pdf" />
-  <div id="status">Sube un PDF para visualizarlo.</div>
+  <input type="file" id="pdfInput" accept="application/pdf">
+
+  <div id="status">
+    Selecciona un PDF.
+  </div>
 
   <div id="pdfContainer"></div>
 
@@ -47,53 +84,124 @@
     const container = document.getElementById("pdfContainer");
     const status = document.getElementById("status");
 
-    input.addEventListener("change", async function () {
-      const file = this.files[0];
+    input.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
       if (!file) return;
 
       container.innerHTML = "";
       status.textContent = "Cargando PDF...";
 
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const buffer = await file.arrayBuffer();
 
-      status.textContent = `PDF cargado: ${pdf.numPages} página(s). Doble click sobre una página para copiarla como imagen.`;
+      const pdf = await pdfjsLib.getDocument({
+        data: buffer
+      }).promise;
 
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-        const page = await pdf.getPage(pageNumber);
+      status.textContent =
+        `PDF cargado (${pdf.numPages} páginas).`;
+
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+
+        const page = await pdf.getPage(pageNum);
 
         const scale = 1.5;
-        const viewport = page.getViewport({ scale });
+
+        const viewport = page.getViewport({
+          scale
+        });
+
+        const wrapper = document.createElement("div");
+        wrapper.className = "pageWrapper";
 
         const canvas = document.createElement("canvas");
-        const context = canvas.getContext("2d");
+        const ctx = canvas.getContext("2d");
 
         canvas.width = viewport.width;
         canvas.height = viewport.height;
-        canvas.title = `Página ${pageNumber}`;
 
         await page.render({
-          canvasContext: context,
+          canvasContext: ctx,
           viewport
         }).promise;
 
-        canvas.addEventListener("dblclick", async () => {
-          try {
-            canvas.toBlob(async (blob) => {
-              const item = new ClipboardItem({
-                "image/png": blob
-              });
+        const btn = document.createElement("button");
+        btn.className = "copyBtn";
+        btn.textContent = "Copiar imagen";
 
-              await navigator.clipboard.write([item]);
-              status.textContent = `Página ${pageNumber} copiada como imagen.`;
+        btn.addEventListener("click", async () => {
+          try {
+
+            canvas.toBlob(async (blob) => {
+
+              // Intentar copiar
+              try {
+
+                if (
+                  navigator.clipboard &&
+                  window.ClipboardItem
+                ) {
+
+                  await navigator.clipboard.write([
+                    new ClipboardItem({
+                      "image/png": blob
+                    })
+                  ]);
+
+                  status.textContent =
+                    `Página ${pageNum} copiada como imagen.`;
+
+                  return;
+                }
+
+              } catch (err) {
+                console.log("Clipboard no disponible");
+              }
+
+              // Compartir en móviles
+              const file = new File(
+                [blob],
+                `pagina-${pageNum}.png`,
+                { type: "image/png" }
+              );
+
+              if (
+                navigator.canShare &&
+                navigator.canShare({ files: [file] })
+              ) {
+
+                await navigator.share({
+                  files: [file],
+                  title: `Página ${pageNum}`
+                });
+
+                return;
+              }
+
+              // Fallback descarga
+              const url = URL.createObjectURL(blob);
+
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `pagina-${pageNum}.png`;
+              a.click();
+
+              URL.revokeObjectURL(url);
+
             }, "image/png");
+
           } catch (error) {
+
             console.error(error);
-            status.textContent = "No se pudo copiar la imagen. Usa HTTPS o localhost.";
+
+            status.textContent =
+              "No se pudo copiar la página.";
           }
         });
 
-        container.appendChild(canvas);
+        wrapper.appendChild(canvas);
+        wrapper.appendChild(btn);
+
+        container.appendChild(wrapper);
       }
     });
   </script>
